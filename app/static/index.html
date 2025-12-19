@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PoC Runner & Shell</title>
+    <!-- Xterm.js CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <style>
+        :root {
+            --bg-color: #1e1e1e;
+            --text-color: #f0f0f0;
+            --accent-color: #007acc;
+            --danger-color: #e55039;
+            --panel-bg: #252526;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        header {
+            background-color: #333;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #444;
+        }
+
+        .global-settings {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        input[type="text"] {
+            background: #3c3c3c;
+            border: 1px solid #555;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
+        button {
+            cursor: pointer;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        .btn-primary { background-color: var(--accent-color); color: white; }
+        .btn-danger { background-color: var(--danger-color); color: white; }
+        .btn-icon { background: transparent; color: #ccc; padding: 2px 6px; }
+        .btn-icon:hover { color: white; background: #444; }
+
+        /* Tabs Navigation */
+        .tabs-nav {
+            display: flex;
+            background-color: #2d2d2d;
+            overflow-x: auto;
+            border-bottom: 1px solid #444;
+        }
+
+        .tab-item {
+            padding: 8px 15px;
+            background: #2d2d2d;
+            border-right: 1px solid #333;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            user-select: none;
+            min-width: 120px;
+            justify-content: space-between;
+        }
+
+        .tab-item.active {
+            background-color: var(--bg-color);
+            border-top: 2px solid var(--accent-color);
+        }
+
+        .tab-item:hover:not(.active) {
+            background-color: #383838;
+        }
+
+        .add-tab-btn {
+            padding: 8px 15px;
+            cursor: pointer;
+            background: #2d2d2d;
+            color: #ccc;
+            border: none;
+            font-size: 1.2em;
+        }
+        .add-tab-btn:hover { background: #383838; color: white; }
+
+        /* Tab Content Area */
+        .tab-content-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            padding: 0;
+        }
+
+        .tab-pane {
+            display: none;
+            height: 100%;
+            flex-direction: column;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        .tab-pane.active {
+            display: flex;
+        }
+
+        .controls-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+            background: var(--panel-bg);
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .terminal-container {
+            flex: 1;
+            background-color: black;
+            padding: 5px;
+            overflow: hidden;
+            border-radius: 4px;
+            position: relative;
+        }
+        
+        /* Ensure xterm fits */
+        .xterm-viewport { overflow-y: auto !important; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h3>PoC Runner</h3>
+    <div class="global-settings">
+        <label>Backconnect IP:</label>
+        <input type="text" id="global-ip" value="0.0.0.0" readonly title="IP default sesuai request">
+        <span style="font-size: 0.8em; color: #888;">(Port generated randomly)</span>
+    </div>
+</header>
+
+<div class="tabs-nav" id="tabs-nav">
+    <!-- Tabs will be injected here -->
+    <button class="add-tab-btn" onclick="addNewTab()">+</button>
+</div>
+
+<div class="tab-content-container" id="tabs-content">
+    <!-- Tab panes will be injected here -->
+</div>
+
+<!-- Xterm.js Libs -->
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+
+<script>
+    let tabCount = 0;
+    const tabs = {}; // Store tab data: { id: { term, socket, fitAddon } }
+
+    function addNewTab() {
+        tabCount++;
+        const tabId = `tab-${tabCount}`;
+        
+        // 1. Create Tab Button
+        const nav = document.getElementById('tabs-nav');
+        const btn = document.createElement('div');
+        btn.className = 'tab-item active';
+        btn.id = `btn-${tabId}`;
+        btn.innerHTML = `
+            <span onclick="switchTab('${tabId}')">Session ${tabCount}</span>
+            <button class="btn-icon" onclick="closeTab('${tabId}')">×</button>
+        `;
+        
+        // Insert before the "+" button
+        nav.insertBefore(btn, nav.lastElementChild);
+
+        // 2. Create Tab Content
+        const contentContainer = document.getElementById('tabs-content');
+        const pane = document.createElement('div');
+        pane.className = 'tab-pane active';
+        pane.id = `pane-${tabId}`;
+        pane.innerHTML = `
+            <div class="controls-bar">
+                <label>Target URL:</label>
+                <input type="text" class="target-input" placeholder="http://target.com:port" style="flex:1;">
+                <button class="btn-primary" onclick="startAttack('${tabId}')">RUN PoC</button>
+            </div>
+            <div class="terminal-container" id="term-${tabId}"></div>
+        `;
+        contentContainer.appendChild(pane);
+
+        // 3. Initialize Terminal
+        const termContainer = pane.querySelector(`#term-${tabId}`);
+        const term = new Terminal({
+            cursorBlink: true,
+            theme: { background: '#000000' }
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(termContainer);
+        fitAddon.fit();
+        
+        term.write('Welcome. Enter Target URL above and click RUN PoC.\r\n');
+
+        // Store session data
+        tabs[tabId] = {
+            term: term,
+            fitAddon: fitAddon,
+            socket: null,
+            sessionId: null
+        };
+
+        // Switch to this new tab
+        switchTab(tabId);
+
+        // Handle resize
+        window.addEventListener('resize', () => fitAddon.fit());
+    }
+
+    function switchTab(tabId) {
+        // Update Nav
+        document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
+        document.getElementById(`btn-${tabId}`).classList.add('active');
+
+        // Update Content
+        document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+        document.getElementById(`pane-${tabId}`).classList.add('active');
+
+        // Refit terminal
+        if(tabs[tabId]) {
+            setTimeout(() => tabs[tabId].fitAddon.fit(), 100); 
+            tabs[tabId].term.focus();
+        }
+    }
+
+    async function closeTab(tabId) {
+        if (!confirm('Close this session? Connection will be terminated.')) return;
+
+        const session = tabs[tabId];
+        
+        // Stop Backend Session
+        if (session.sessionId) {
+            try {
+                await fetch(`/api/stop/${session.sessionId}`, { method: 'DELETE' });
+            } catch (e) {
+                console.error("Error stopping session", e);
+            }
+        }
+
+        // Close Socket
+        if (session.socket) {
+            session.socket.close();
+        }
+
+        // Remove UI
+        document.getElementById(`btn-${tabId}`).remove();
+        document.getElementById(`pane-${tabId}`).remove();
+        delete tabs[tabId];
+
+        // Switch to another tab if available
+        const keys = Object.keys(tabs);
+        if (keys.length > 0) {
+            switchTab(keys[keys.length - 1]);
+        }
+    }
+
+    async function startAttack(tabId) {
+        const session = tabs[tabId];
+        const pane = document.getElementById(`pane-${tabId}`);
+        const targetUrl = pane.querySelector('.target-input').value;
+        const backconnectIp = document.getElementById('global-ip').value;
+
+        if (!targetUrl) {
+            alert('Please enter a target URL');
+            return;
+        }
+
+        session.term.writeln('\r\n[*] Initiating attack sequence...');
+        session.term.writeln(`[*] Target: ${targetUrl}`);
+        session.term.writeln(`[*] Backconnect IP: ${backconnectIp} (Default)`);
+
+        try {
+            // 1. Request Start
+            const response = await fetch('/api/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    target_url: targetUrl,
+                    backconnect_ip: backconnectIp
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.status !== 'success') {
+                throw new Error(data.detail || 'Unknown error');
+            }
+
+            session.sessionId = data.session_id;
+            session.term.writeln(`[+] Listener started on port ${data.port}`);
+            session.term.writeln(`[+] PoC executed. Waiting for callback...\r\n`);
+
+            // 2. Connect WebSocket
+            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsUrl = `${protocol}://${window.location.host}/ws/${data.session_id}`;
+            
+            const socket = new WebSocket(wsUrl);
+            session.socket = socket;
+
+            socket.onopen = () => {
+                session.term.writeln('[+] WebSocket connected to TTY Shell.\r\n');
+            };
+
+            socket.onmessage = (event) => {
+                session.term.write(event.data);
+            };
+
+            socket.onclose = () => {
+                session.term.writeln('\r\n[!] Connection closed.');
+            };
+
+            socket.onerror = (error) => {
+                session.term.writeln(`\r\n[!] WebSocket Error: ${error}`);
+            };
+
+            // 3. Bind Terminal Input to Socket
+            session.term.onData(data => {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(data);
+                }
+            });
+
+        } catch (err) {
+            session.term.writeln(`\r\n[!] ERROR: ${err.message}`);
+        }
+    }
+
+    // Initialize first tab
+    addNewTab();
+
+</script>
+
+</body>
+</html>
